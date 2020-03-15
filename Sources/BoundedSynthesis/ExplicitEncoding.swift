@@ -6,28 +6,28 @@ import Specification
 import TransitionSystem
 
 struct ExplicitEncoding: BoSyEncoding {
-    
+
     let options: BoSyOptions
     let automaton: CoBüchiAutomaton
     let specification: SynthesisSpecification
-    
+
     // intermediate results
     var assignments: BooleanAssignment?
     var solutionBound: Int
-    
+
     init(options: BoSyOptions, automaton: CoBüchiAutomaton, specification: SynthesisSpecification) {
         self.options = options
         self.automaton = automaton
         self.specification = specification
-        
+
         assignments = nil
         solutionBound = 0
     }
-    
+
     func getEncoding(forBound bound: Int) -> Logic? {
-        
+
         let states = 0..<bound
-        
+
         let inputPropositions: [Proposition] = specification.inputs.map({ Proposition($0) })
 
         // assignment that represents initial state condition
@@ -35,20 +35,20 @@ struct ExplicitEncoding: BoSyEncoding {
         for state in automaton.initialStates {
             initialAssignment[lambda(0, state)] = Literal.True
         }
-        
+
         var matrix: [Logic] = []
         //matrix.append(automaton.initialStates.reduce(Literal.True, { (val, state) in val & lambda(0, state) }))
-        
+
         for source in states {
             // for every valuation of inputs, there must be at least one tau enabled
             var conjunction: [Logic] = []
             for i in allBooleanAssignments(variables: inputPropositions) {
                 let disjunction = states.map({ target in tau(source, i, target) })
-                                        .reduce(Literal.False, |)
+                        .reduce(Literal.False, |)
                 conjunction.append(disjunction)
             }
             matrix.append(conjunction.reduce(Literal.True, &))
-            
+
             func getRenamer(i: BooleanAssignment) -> RenamingBooleanVisitor {
                 if specification.semantics == .mealy {
                     return RenamingBooleanVisitor(rename: { name in self.specification.outputs.contains(name) ? self.output(name, forState: source, andInputs: i) : name })
@@ -56,10 +56,10 @@ struct ExplicitEncoding: BoSyEncoding {
                     return RenamingBooleanVisitor(rename: { name in self.specification.outputs.contains(name) ? self.output(name, forState: source) : name })
                 }
             }
-            
+
             for q in automaton.states {
                 var conjunct: [Logic] = []
-                
+
                 if let condition = automaton.safetyConditions[q] {
                     for i in allBooleanAssignments(variables: inputPropositions) {
                         let evaluatedCondition = condition.eval(assignment: i)
@@ -67,12 +67,12 @@ struct ExplicitEncoding: BoSyEncoding {
                         conjunct.append(evaluatedCondition.accept(visitor: renamer))
                     }
                 }
-                
+
                 guard let outgoing = automaton.transitions[q] else {
                     assert(conjunct.isEmpty)
                     continue
                 }
-                
+
                 for (qPrime, guardCondition) in outgoing {
                     for i in allBooleanAssignments(variables: inputPropositions) {
                         let evaluatedCondition = guardCondition.eval(assignment: i)
@@ -85,12 +85,12 @@ struct ExplicitEncoding: BoSyEncoding {
                         }
                     }
                 }
-                matrix.append(lambda(source, q) -->  conjunct.reduce(Literal.True, &))
+                matrix.append(lambda(source, q) --> conjunct.reduce(Literal.True, &))
             }
         }
-        
+
         let formula: Logic = matrix.reduce(Literal.True, &)
-        
+
         var lambdas: [Proposition] = []
         for s in 0..<bound {
             for q in automaton.states {
@@ -121,24 +121,24 @@ struct ExplicitEncoding: BoSyEncoding {
                 }
             }
         }
-        
+
         let existentials: [Proposition] = lambdas + lambdaSharps + taus + outputPropositions
-        
+
         var qbf: Logic = Quantifier(.Exists, variables: existentials, scope: formula)
-        
+
         qbf = qbf.eval(assignment: initialAssignment)
-        
+
         //print(qbf)
-        
+
         let boundednessCheck = BoundednessVisitor()
         assert(qbf.accept(visitor: boundednessCheck))
-        
+
         let removeComparable = RemoveComparableVisitor(bound: bound)
         qbf = qbf.accept(visitor: removeComparable)
-        
+
         return qbf
     }
-    
+
     func requireTransition(from s: Int, q: CoBüchiAutomaton.State, i: BooleanAssignment, qPrime: CoBüchiAutomaton.State, bound: Int, rejectingStates: Set<CoBüchiAutomaton.State>) -> Logic {
         let validTransition: [Logic]
         if automaton.isStateInNonRejectingSCC(q) || automaton.isStateInNonRejectingSCC(qPrime) || !automaton.isInSameSCC(q, qPrime) {
@@ -151,28 +151,28 @@ struct ExplicitEncoding: BoSyEncoding {
             validTransition = (0..<bound).map({
                 sPrime in
                 tauNextStateAssertion(state: s, i, nextState: sPrime, bound: bound) -->
-                (lambda(sPrime, qPrime) & BooleanComparator(rejectingStates.contains(qPrime) ? .Less : .LessOrEqual, lhs: lambdaSharp(sPrime, qPrime), rhs: lambdaSharp(s, q)))
+                        (lambda(sPrime, qPrime) & BooleanComparator(rejectingStates.contains(qPrime) ? .Less : .LessOrEqual, lhs: lambdaSharp(sPrime, qPrime), rhs: lambdaSharp(s, q)))
             })
         }
         return validTransition.reduce(Literal.True, &)
     }
-    
+
     func tauNextStateAssertion(state: Int, _ inputs: BooleanAssignment, nextState: Int, bound: Int) -> Logic {
         return tau(state, inputs, nextState)
     }
-    
+
     func lambda(_ state: Int, _ automatonState: CoBüchiAutomaton.State) -> Proposition {
         return Proposition("λ_\(state)_\(automatonState)")
     }
-    
+
     func lambdaSharp(_ state: Int, _ automatonState: CoBüchiAutomaton.State) -> Proposition {
         return Proposition("λ#_\(state)_\(automatonState)")
     }
-    
+
     func tau(_ fromState: Int, _ inputs: BooleanAssignment, _ toState: Int) -> Proposition {
         return Proposition("τ_\(fromState)_\(bitStringFromAssignment(inputs))_\(toState)")
     }
-    
+
     func output(_ name: String, forState state: Int, andInputs inputs: BooleanAssignment? = nil) -> String {
         guard let inputs = inputs else {
             assert(specification.semantics == .moore)
@@ -182,27 +182,27 @@ struct ExplicitEncoding: BoSyEncoding {
         return "\(name)_\(state)_\(bitStringFromAssignment(inputs))"
     }
 
-    
+
     mutating func solve(forBound bound: Int) throws -> Bool {
         Logger.default().info("build encoding for bound \(bound)")
-        
+
         let constraintTimer = options.statistics?.startTimer(phase: .constraintGeneration)
         guard let instance = getEncoding(forBound: bound) else {
             throw BoSyEncodingError.EncodingFailed("could not build encoding")
         }
         constraintTimer?.stop()
         //print(instance)
-        
+
         guard let solver = options.solver?.instance as? SatSolver else {
             throw BoSyEncodingError.SolvingFailed("solver creation failed")
         }
-        
+
         let solvingTimer = options.statistics?.startTimer(phase: .solving)
         guard let result = solver.solve(formula: instance) else {
             throw BoSyEncodingError.SolvingFailed("solver failed on instance")
         }
         solvingTimer?.stop()
-        
+
         if case .sat(let assignments) = result {
             // keep top level valuations of solver
             self.assignments = assignments
@@ -211,16 +211,16 @@ struct ExplicitEncoding: BoSyEncoding {
         }
         return false
     }
-    
+
     func extractSolution() -> TransitionSystem? {
         let extractionTimer = options.statistics?.startTimer(phase: .solutionExtraction)
         let inputPropositions: [Proposition] = specification.inputs.map({ Proposition($0) })
-        
+
         guard let assignments = assignments else {
             Logger.default().error("hasSolution() must be true before calling this function")
             return nil
         }
-        
+
         var solution = ExplicitStateSolution(bound: solutionBound, specification: specification)
         for source in 0..<solutionBound {
             for target in 0..<solutionBound {
