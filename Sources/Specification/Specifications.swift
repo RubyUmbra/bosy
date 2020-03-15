@@ -1,6 +1,6 @@
 import Foundation
 import Basic
-import Utility
+import SPMUtility
 
 import Utils
 import LTL
@@ -64,7 +64,7 @@ public struct SynthesisSpecification: Codable {
         tempFile.fileHandle.write(Data(tlsf.utf8))
 
         do {
-            let result = try Basic.Process.popen(arguments: ["./Tools/syfco", "--format", "bosy", tempFile.path.asString])
+            let result = try Basic.Process.popen(arguments: ["./Tools/syfco", "--format", "bosy", tempFile.path.pathString])
             return .fromJson(string: try result.utf8Output())
         } catch {
             Logger.default().error("could not transform TLSF to BoSy format using syfco")
