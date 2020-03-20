@@ -5,6 +5,14 @@ import Automata
 import Specification
 import TransitionSystem
 
+enum NodeType: Int, CustomStringConvertible {
+    case TERMINAL = 0, AND, OR, NOT, NONE
+
+    var description: String {
+        "\(self.rawValue)"
+    }
+}
+
 struct ExplicitEncoding: BoSyEncoding {
 
     let options: BoSyOptions
@@ -171,6 +179,46 @@ struct ExplicitEncoding: BoSyEncoding {
 
     func tau(_ fromState: Int, _ inputs: BooleanAssignment, _ toState: Int) -> Proposition {
         return Proposition("τ_\(fromState)_\(bitStringFromAssignment(inputs))_\(toState)")
+    }
+
+    func eta(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ nodeType: NodeType) -> Proposition {
+        Proposition("η_\(fromState)_\(toState)_\(nodeIndex)_\(nodeType)")
+    }
+
+    func nodeType(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ nodeType: NodeType) -> Proposition {
+        eta(fromState, toState, nodeIndex, nodeType)
+    }
+
+    func sigma(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ ch: Int) -> Proposition {
+        Proposition("σ_\(fromState)_\(toState)_\(nodeIndex)_\(ch)")
+    }
+
+    func nodeChild(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ ch: Int) -> Proposition {
+        sigma(fromState, toState, nodeIndex, ch)
+    }
+
+    func pi(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ p: Int) -> Proposition {
+        Proposition("π\(fromState)_\(toState)_\(nodeIndex)_\(p)")
+    }
+
+    func nodeParent(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ p: Int) -> Proposition {
+        pi(fromState, toState, nodeIndex, p)
+    }
+
+    func nu(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ inputs: BooleanAssignment) -> Proposition {
+        Proposition("ν_\(fromState)_\(toState)_\(nodeIndex)_\(bitStringFromAssignment(inputs))")
+    }
+
+    func nodeValue(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ inputs: BooleanAssignment) -> Proposition {
+        nu(fromState, toState, nodeIndex, inputs)
+    }
+
+    func chi(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ input: Proposition) -> Proposition {
+        Proposition("χ_\(fromState)_\(toState)_\(nodeIndex)_\(input)")
+    }
+
+    func nodeAssignment(_ fromState: Int, _ toState: Int, _ nodeIndex: Int, _ input: Proposition) -> Proposition {
+        chi(fromState, toState, nodeIndex, input)
     }
 
     func output(_ name: String, forState state: Int, andInputs inputs: BooleanAssignment? = nil) -> String {
