@@ -33,6 +33,7 @@ struct ExplicitEncoding: BoSyEncoding {
     }
 
     func getEncoding(forBound bound: Int) -> Logic? {
+        let P = 3 // TODO add P as bound of tree size
 
         let states = 0..<bound
 
@@ -96,6 +97,419 @@ struct ExplicitEncoding: BoSyEncoding {
                 matrix.append(lambda(source, q) --> conjunct.reduce(Literal.True, &))
             }
         }
+
+        //
+        //
+        //
+
+        // (nodeType_q_k_p = TERMINAL) <-> (nodeAssignment_q_k_p != 0)
+        // (nodeType_q_k_p = TERMINAL) <-> OR_x(nodeAssignment_q_k_p = x)
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    matrix.append(
+                            nodeType(q, k, p, NodeType.TERMINAL) <->
+                                    inputPropositions
+                                            .map({ x in nodeAssignment(q, k, p, x) })
+                                            .reduce(Literal.False, |)
+                    )
+                }
+            }
+        }
+
+        // (nodeChild_q_k_p = ch) -> (nodeParent_q_k_ch = p)
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    for ch in 1...P {
+                        matrix.append(nodeChild(q, k, p, ch) --> nodeParent(q, k, ch, p))
+                    }
+                }
+            }
+        }
+
+        // (nodeParent_q_k_p != 0) <-> (nodeType_q_k_p != NONE) ; p != 1 (root)
+        // OR_par(nodeParent_q_k_p == par) <-> !(nodeType_q_k_p = NONE)
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    if p != 1 {
+                        matrix.append(
+                                (1...P).map({ par in nodeParent(q, k, p, par) }).reduce(Literal.False, |)
+                                        <-> (!nodeType(q, k, p, NodeType.NONE))
+                        )
+                    }
+                }
+            }
+        }
+
+        // (nodeType_q_k_p = AND | nodeType_q_k_p = OR) & (nodeChild_q_k_p = c) -> (nodeParent_q_k_c+1 = p)
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    for c in 1..<P {
+                        matrix.append(
+                                ((nodeType(q, k, p, NodeType.AND) | nodeType(q, k, p, NodeType.OR)) & nodeChild(q, k, p, c)) -->
+                                        nodeParent(q, k, c + 1, p)
+                        )
+                    }
+                }
+            }
+        }
+
+        // alias between nodeValue(q, k, p=1, u) <-> tau(q, k, u)
+        for c in states {
+            for k in states {
+                for i in allBooleanAssignments(variables: inputPropositions) {
+                    matrix.append(nodeValue(c, k, 1, i) <-> tau(c, i, k))
+                }
+            }
+        }
+
+        // (nodeType_q_k_p = TERMINAL) & (nodeAssignment_q_k_p = x) -> AND_u(nodeValue_q_k_p_u <-> u_x)
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    for x in inputPropositions {
+                        matrix.append(
+                                (nodeType(q, k, p, NodeType.TERMINAL) & nodeAssignment(q, k, p, x)) -->
+                                        allBooleanAssignments(variables: inputPropositions)
+                                                .map({ u in nodeValue(q, k, p, u) <-> (u[x] ?? Literal.False) })
+                                                .reduce(Literal.True, &)
+                        )
+                    }
+                }
+            }
+        }
+
+        // (nodeType_q_k_p = AND) & (nodeChild_q_k_p = c) -> AND_u(nodeValue_q_k_p_u <-> (nodeValue_q_k_c_u & nodeValue_q_k_c+1_u))
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    for c in 1..<P {
+                        matrix.append(
+                                (nodeType(q, k, p, NodeType.AND) & nodeChild(q, k, p, c)) -->
+                                        allBooleanAssignments(variables: inputPropositions)
+                                                .map({ u in nodeValue(q, k, p, u) <-> (nodeValue(q, k, c, u) & nodeValue(q, k, c + 1, u)) })
+                                                .reduce(Literal.True, &)
+                        )
+                    }
+                }
+            }
+        }
+
+        // (nodeType_q_k_p = OR) & (nodeChild_q_k_p = c) -> AND_u(nodeValue_q_k_p_u <-> (nodeValue_q_k_c_u | nodeValue_q_k_c+1_u))
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    for c in 1..<P {
+                        matrix.append(
+                                (nodeType(q, k, p, NodeType.OR) & nodeChild(q, k, p, c)) -->
+                                        allBooleanAssignments(variables: inputPropositions)
+                                                .map({ u in nodeValue(q, k, p, u) <-> (nodeValue(q, k, c, u) | nodeValue(q, k, c + 1, u)) })
+                                                .reduce(Literal.True, &)
+                        )
+                    }
+                }
+            }
+        }
+
+        // (nodeType_q_k_p = NOT) & (nodeChild_q_k_p = c) -> AND_u(nodeValue_q_k_p_u <-> !nodeValue_q_k_c_u)
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    for c in 1...P {
+                        matrix.append(
+                                (nodeType(q, k, p, NodeType.NOT) & nodeChild(q, k, p, c)) -->
+                                        allBooleanAssignments(variables: inputPropositions)
+                                                .map({ u in nodeValue(q, k, p, u) <-> !nodeValue(q, k, c, u) })
+                                                .reduce(Literal.True, &)
+                        )
+                    }
+                }
+            }
+        }
+
+        // (nodeType_q_k_p = NONE) -> AND_u(!nodeValue_q_k_p_u)
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    matrix.append(
+                            nodeType(q, k, p, NodeType.NONE) -->
+                                    allBooleanAssignments(variables: inputPropositions)
+                                            .map({ u in !nodeValue(q, k, p, u) })
+                                            .reduce(Literal.True, &)
+                    )
+                }
+            }
+        }
+
+        //
+        //
+        //
+
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    matrix.append(exactlyOne([
+                        nodeType(q, k, p, NodeType.TERMINAL),
+                        nodeType(q, k, p, NodeType.NONE),
+                        nodeType(q, k, p, NodeType.AND),
+                        nodeType(q, k, p, NodeType.NOT),
+                        nodeType(q, k, p, NodeType.OR)
+                    ]))
+                }
+            }
+        }
+
+        //
+        //
+        //
+
+        // None-typed nodes have largest indices
+        // (nodeType[p] = NONE) => (nodeType[p+1] = NONE)
+        for q in states {
+            for k in states {
+                for p in 1..<P {
+                    matrix.append(
+                            nodeType(q, k, p, NodeType.NONE) --> nodeType(q, k, p + 1, NodeType.NONE)
+                    )
+                }
+            }
+        }
+
+        // TODO
+        // Only null-transitions have no guard (root is none-typed)
+        // (transitionDestination = 0) <=> (nodeType[1] = NONE)
+        // for (c in 1..C)
+        //        for (k in 1..K)
+        //            iff(
+        //                transitionDestination[c, k] eq 0,
+        //                nodeType[c, k, 1] eq NodeType.NONE
+        //            )
+
+        // child=>parent relation
+        // (nodeChild[p] = ch) => (nodeParent[ch] = p)
+        // Done upper
+        // (nodeChild[p] = 0) => AND_{ch}(nodeParent[ch] != p)
+        for q in states {
+            for k in states {
+                for p in 1...P {
+                    matrix.append(
+                            nodeChild(q, k, p, 0) --> (1...P).map({ ch in !nodeParent(q, k, ch, p) }).reduce(Literal.True, &)
+                    )
+                }
+            }
+        }
+
+        // Only typed nodes, except the root, have parent
+        for c in states {
+            for k in states {
+                for p in 2...P {
+                    matrix.append(
+                            (!nodeParent(c, k, p, 0)) <-> (!nodeType(c, k, p, NodeType.NONE))
+                    )
+                }
+            }
+        }
+
+        // TERMINALS CONSTRAINTS
+
+        // Only terminal nodes have associated input variables
+        // (nodeType[p] = TERMINAL) <=> (nodeInputVariable[p] != 0)
+        // Done upper
+
+        // Terminals do not have children
+        for c in states {
+            for k in states {
+                for p in 1...P {
+                    matrix.append(
+                            nodeType(c, k, p, NodeType.TERMINAL) --> nodeChild(c, k, p, 0)
+                    )
+                }
+            }
+        }
+
+        // AND/OR NODES CONSTRAINTS
+
+        // AND/OR nodes cannot have numbers P-1 or P
+        for c in states {
+            for k in states {
+                if (P >= 1) {
+                    matrix.append(!nodeType(c, k, P, NodeType.AND))
+                    matrix.append(!nodeType(c, k, P, NodeType.OR))
+                }
+                if (P >= 2) {
+                    matrix.append(!nodeType(c, k, P - 1, NodeType.AND))
+                    matrix.append(!nodeType(c, k, P - 1, NodeType.OR))
+                }
+            }
+        }
+
+        // AND/OR: left child cannot have number P
+        // (nodeType[p] = AND/OR) => (nodeChild[p] != P)
+        for c in states {
+            for k in states {
+                if (1 <= P - 2) {
+                    for p in 1...(P - 2) {
+                        matrix.append(
+                                (nodeType(c, k, p, NodeType.AND) | nodeType(c, k, p, NodeType.OR)) --> !nodeChild(c, k, p, P)
+                        )
+                    }
+                }
+            }
+        }
+
+        // AND/OR nodes have left child
+        for c in states {
+            for k in states {
+                if (1 <= P - 2) {
+                    for p in 1...(P - 2) {
+                        matrix.append(
+                                (nodeType(c, k, p, NodeType.AND) | nodeType(c, k, p, NodeType.OR)) --> !nodeChild(c, k, p, 0)
+                        )
+                    }
+                }
+            }
+        }
+
+        // TODO
+        // AND/OR: hard to explain
+        // parent[p, par] & nodetype[par, AND/OR] => child[par, p] | child[par, p-1]
+//        for c in states {
+//            for k in states {
+//                for par in 1...P {
+//                    // run {
+//                    //                        val ch = par + 1
+//                    //                        if (ch < P)
+//                    //                            for (nt in listOf(NodeType.AND, NodeType.OR))
+//                    //                                clause(
+//                    //                                    nodeType[c, k, par] neq nt,
+//                    //                                    nodeParent[c, k, ch] neq par,
+//                    //                                    nodeChild[c, k, par] eq ch
+//                    //                                )
+//                    //                    }
+//                    //                    for (ch in (par + 2) until P)
+//                    //                        for (nt in listOf(NodeType.AND, NodeType.OR))
+//                    //                            clause(
+//                    //                                nodeType[c, k, par] neq nt,
+//                    //                                nodeParent[c, k, ch] neq par,
+//                    //                                nodeChild[c, k, par] eq ch,
+//                    //                                nodeChild[c, k, par] eq ch - 1
+//                    //                            )
+//                }
+//            }
+//        }
+
+        // Right child of binary operators follows the left one
+        // (nodeType[p] = AND/OR) & (nodeChild[p] = ch) => (nodeParent[ch+1] = p)
+        for c in states {
+            for k in states {
+                for p in 1...P {
+                    for ch in 1..<P {
+                        matrix.append(
+                                ((nodeType(c, k, p, NodeType.AND) | nodeType(c, k, p, NodeType.OR)) & nodeChild(c, k, p, ch))
+                                        --> nodeParent(c, k, ch + 1, p)
+                        )
+                    }
+                }
+            }
+        }
+
+        // NOT NODES CONSTRAINTS
+
+        // NOT nodes cannot have number P
+        for c in states {
+            for k in states {
+                if P >= 1 {
+                    matrix.append(
+                            !nodeType(c, k, P, NodeType.NOT)
+                    )
+                }
+            }
+        }
+
+        // NOT nodes have left child
+        for c in states {
+            for k in states {
+                for p in 1..<P {
+                    matrix.append(
+                            nodeType(c, k, p, NodeType.NOT) --> (!nodeChild(c, k, p, 0))
+                    )
+                }
+            }
+        }
+
+        // NOT: parent's child is the current node
+        // parent[p, par] & nodetype[par, NOT] => child[par, p]
+        for c in states {
+            for k in states {
+                for p in 1...P {
+                    for par in 1...P {
+                        matrix.append(
+                                (nodeParent(c, k, p, par) & nodeType(c, k, par, NodeType.NOT))
+                                        --> nodeChild(c, k, par, p)
+                        )
+                    }
+                }
+            }
+        }
+
+        // NONE-TYPE NODES CONSTRAINTS
+
+        // None-typed nodes do not have children
+        for c in states {
+            for k in states {
+                for p in 1...P {
+                    matrix.append(
+                            nodeType(c, k, p, NodeType.NONE) --> nodeChild(c, k, p, 0)
+                    )
+                }
+            }
+        }
+
+        // Terminal nodes have value from associated input variables
+        // (nodeInputVariable[p] = x) => AND_{u}( nodeValue[p,u] <=> u[x] )
+        // Done upper
+
+        // AND: value is calculated as a conjunction of children values
+        // (nodeType[p] = AND) & (nodeChild[p] = ch) =>
+        //  AND_{u}( nodeValue[p,u] <=> nodeValue[ch,u] & nodeValue[ch+1,u] )
+        // Done upper
+
+        // OR: value is calculated as a disjunction of children values
+        // (nodeType[p] = OR) & (nodeChild[p] = ch) =>
+        //  AND_{u}( nodeValue[p,u] <=> nodeValue[ch,u] | nodeValue[ch+1,u] )
+        // Done upper
+
+        // NOT: value is calculated as a negation of a child value
+        // (nodeType[p] = OR) & (nodeChild[p] = ch) =>
+        //  AND_{u}( nodeValue[p,u] <=> ~nodeValue[ch,u] )
+        // Done upper
+
+        // None-type nodes have False values
+        // (nodeType[p] = NONE) => AND_{u}( ~nodeValue[p,u] )
+        // Done upper
+
+        // Adhoc guard conditions constraints
+
+        // Forbid double negation
+        // (nodeType[p] = NOT) & (nodeChild[p] = ch) => (nodeType[ch] != NOT)
+        for c in states {
+            for k in states {
+                for p in 1...P {
+                    for ch in 1...P {
+                        matrix.append(
+                                (nodeType(c, k, p, NodeType.NOT) & nodeChild(c, k, p, ch)) --> !nodeType(c, k, ch, NodeType.NOT)
+                        )
+                    }
+                }
+            }
+        }
+
+        //
+        //
+        //
 
         let formula: Logic = matrix.reduce(Literal.True, &)
 
