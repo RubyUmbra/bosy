@@ -129,8 +129,36 @@ struct ExplicitEncoding: BoSyEncoding {
                 }
             }
         }
+        // Add Propositions to existential quantification
+        var nodeTypes: [Proposition] = []
+        var nodeChilds: [Proposition] = []
+        var nodeParents: [Proposition] = []
+        var nodeValues: [Proposition] = []
+        var nodeAssignments: [Proposition] = []
+        for c in states { // fromState: Int
+            for k in states { // toState: Int
+                for p in 0...P { // nodeIndex: Int
+                    nodeTypes.append(nodeType(c, k, p, NodeType.TERMINAL))
+                    nodeTypes.append(nodeType(c, k, p, NodeType.AND))
+                    nodeTypes.append(nodeType(c, k, p, NodeType.OR))
+                    nodeTypes.append(nodeType(c, k, p, NodeType.NOT))
+                    nodeTypes.append(nodeType(c, k, p, NodeType.NONE))
+                    for ch in 0...P {
+                        nodeChilds.append(nodeChild(c, k, p, ch))
+                        nodeParents.append(nodeParent(c, k, ch, p))
+                    }
+                    for i in allBooleanAssignments(variables: inputPropositions) {
+                        nodeValues.append(nodeValue(c, k, p, i))
+                    }
+                    for x in inputPropositions {
+                        nodeAssignments.append(nodeAssignment(c, k, p, x))
+                    }
+                }
+            }
+        }
 
         let existentials: [Proposition] = lambdas + lambdaSharps + taus + outputPropositions
+        + nodeTypes + nodeChilds + nodeParents + nodeValues + nodeAssignments
 
         var qbf: Logic = Quantifier(.Exists, variables: existentials, scope: formula)
 
