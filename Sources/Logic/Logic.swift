@@ -185,6 +185,24 @@ public prefix func !(op: Logic) -> Logic {
     return UnaryOperator(.Negation, operand: op)
 }
 
+public func atLeastOne(_ list: [Logic]) -> Logic {
+    list.reduce(Literal.False, |)
+}
+
+public func atMostOne(_ list: [Logic]) -> Logic {
+    var res: [Logic] = []
+    for a in list {
+        for b in list {
+            res.append(a --> !b)
+        }
+    }
+    return res.reduce(Literal.True, &)
+}
+
+public func exactlyOne(_ list: [Logic]) -> Logic {
+    atLeastOne(list) & atMostOne(list)
+}
+
 public struct UnaryOperator: Logic, Equatable {
     public enum OperatorType: CustomStringConvertible {
         case Negation
